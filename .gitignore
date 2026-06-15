@@ -1,0 +1,19 @@
+# Claude Code workspace / agent files — never publish
+.claude/
+.claude/**
+CLAUDE.md
+
+# Local runtime output (may contain tenant data — keep private)
+Logs/
+Backups/
+*.log
+
+# Temp / scratch
+_dlg_preview.png
+*.tmp
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+.vs/
+.vscode/
