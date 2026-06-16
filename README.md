@@ -17,7 +17,7 @@ Pull every configuration profile from your tenant into an editable grid, change 
 - [Screenshots](#screenshots)
 - [What it does](#what-it-does)
 - [What it does *not* do](#what-it-does-not-do)
-- [Profile types covered](#profile-types-covered)
+- [Content types covered](#content-types-covered)
 - [Requirements](#requirements)
 - [Permissions](#permissions)
 - [Install](#install)
@@ -28,6 +28,7 @@ Pull every configuration profile from your tenant into an editable grid, change 
 - [Logs](#logs)
 - [Safety notes](#safety-notes)
 - [Troubleshooting](#troubleshooting)
+- [Changelog](#changelog)
 - [Disclaimer](#disclaimer)
 
 ---
@@ -35,16 +36,18 @@ Pull every configuration profile from your tenant into an editable grid, change 
 ## Screenshots
 
 <!--
-  Add a few screenshots here. Drop the image files into a `docs/` folder in the repo
-  and update the paths below. Keep it to two or three — the main window and a key feature
-  are usually enough. Suggested shots: the main window with profiles loaded, and Find & Replace.
+  Add your screenshots here. Drop the image files into a `docs/` folder in the repo
+  and update the paths below. Suggested shots: the main window with profiles loaded,
+  the Content Types picker, and Find & Replace.
 -->
 
 ![Main window — profiles loaded in the editable grid](docs/screenshot-main.png)
 
+![Content Types picker — choose which Intune content types to pull](docs/screenshot-content-types.png)
+
 ![Find & Replace dialog](docs/screenshot-find-replace.png)
 
-<!-- Optional third shot, e.g. a dry-run / apply result in the activity log:
+<!-- Optional extra shot, e.g. a dry-run / apply result in the activity log:
 ![Dry-run preview in the activity log](docs/screenshot-dryrun.png)
 -->
 
@@ -53,8 +56,9 @@ Pull every configuration profile from your tenant into an editable grid, change 
 ## What it does
 
 - **Connects to Microsoft Graph** interactively using the Microsoft Graph PowerShell SDK.
-- **Pulls all configuration profiles** across four families (see below) into an editable data grid.
-- **Shows the specific template kind** in the Type column, e.g. `Device Configuration (VPN)`, `(SCEP certificate)`, `(Domain join)`, `(Wi-Fi)`.
+- **Pulls many Intune content types** — not just configuration profiles, but compliance policies, app protection/configuration policies, scripts, remediations, filters, Autopilot profiles, update rings/profiles, and more (see [Content types covered](#content-types-covered)).
+- **Content Types picker** — a dropdown checklist (with *Select all*) to choose exactly which content types the next **Pull** fetches.
+- **Shows the specific template kind** for Device Configuration in the Type column, e.g. `Device Configuration (VPN)`, `(SCEP certificate)`, `(Domain join)`, `(Wi-Fi)`.
 - **Edits inline** — change *New Name* / *New Description* directly in the grid; changed cells are highlighted.
 - **Exports to CSV** for bulk editing in Excel, then **imports the CSV back** in.
 - **Find & Replace** across names/descriptions — literal or regex, with a one-click "strip trailing version" preset (e.g. removing ` v3.9`, `-2.8`).
@@ -65,23 +69,36 @@ Pull every configuration profile from your tenant into an editable grid, change 
 
 ## What it does *not* do
 
-- ❌ Does **not** change anything other than **display name** and **description**. Settings, assignments, scope tags, platform, etc. are never modified.
-- ❌ Does **not** create, delete, duplicate, or assign profiles.
-- ❌ Does **not** touch profile *settings/payloads* — it is a metadata (name/description) editor only.
-- ❌ Does **not** manage compliance policies, app protection/configuration policies, scripts, remediations, autopilot profiles, or enrollment configurations.
+- ❌ Does **not** change anything other than **display name** and **description**. Settings, assignments, scope tags, platform, payloads, etc. are never modified.
+- ❌ Does **not** create, delete, duplicate, or assign anything.
+- ❌ Does **not** touch the *settings/content* of an item — it is a name/description editor only.
 - ❌ Does **not** support app-only/unattended authentication — sign-in is interactive (delegated).
 - ❌ Is **not** a Microsoft product and is **not** supported by Microsoft.
 
-## Profile types covered
+## Content types covered
 
-All endpoints use Microsoft Graph **beta**, which surfaces every derived template type (the `v1.0` list omits many, such as certificate and health-monitoring profiles).
+All endpoints use Microsoft Graph **beta** (except Entra groups, which use `v1.0`), so every derived template type is surfaced. Pick which to pull in the **Content Types** dropdown — everything is selected by default **except Entra groups** (opt-in, because renaming directory groups is high-impact).
 
-| Type shown in tool | Graph collection | Notes |
-|---|---|---|
-| **Settings Catalog** | `deviceManagement/configurationPolicies` | Uses `name` / `description` |
-| **Device Configuration** | `deviceManagement/deviceConfigurations` | All templates: device restrictions, domain join, Wi-Fi, VPN, SCEP/PKCS/trusted certificates, health monitoring, kiosk, email, custom OMA-URI, etc. |
-| **Administrative Template** | `deviceManagement/groupPolicyConfigurations` | Imported/ADMX-backed templates |
-| **Template / Baseline** | `deviceManagement/intents` | Endpoint security & security baselines |
+| Content type | Graph collection |
+|---|---|
+| **Settings Catalog** | `deviceManagement/configurationPolicies` |
+| **Device Configuration** *(all templates — device restrictions, domain join, Wi-Fi, VPN, SCEP/PKCS/trusted certs, health monitoring, kiosk, email, custom OMA-URI, …)* | `deviceManagement/deviceConfigurations` |
+| **Administrative Template** | `deviceManagement/groupPolicyConfigurations` |
+| **Template / Baseline** *(endpoint security & security baselines)* | `deviceManagement/intents` |
+| **Compliance Policy** | `deviceManagement/deviceCompliancePolicies` |
+| **PowerShell Script** | `deviceManagement/deviceManagementScripts` |
+| **Remediation Script** | `deviceManagement/deviceHealthScripts` |
+| **macOS Shell Script** | `deviceManagement/deviceShellScripts` |
+| **App Protection (iOS / Android)** | `deviceAppManagement/iosManagedAppProtections`, `androidManagedAppProtections` |
+| **App Config (managed apps / managed devices)** | `deviceAppManagement/targetedManagedAppConfigurations`, `mobileAppConfigurations` |
+| **Assignment Filter** | `deviceManagement/assignmentFilters` |
+| **Autopilot Profile** | `deviceManagement/windowsAutopilotDeploymentProfiles` |
+| **Device Category** | `deviceManagement/deviceCategories` |
+| **Driver / Feature / Quality Update Profiles** | `deviceManagement/windows{Driver,Feature,Quality}UpdateProfiles` |
+| **Quality Update Policy** | `deviceManagement/windowsQualityUpdatePolicies` |
+| **Entra Group** *(opt-in)* | `groups` |
+
+> The catalogue is data-driven and easy to extend — each type is one row in the `$ContentTypes` table in the script (endpoint, name property, and whether its PATCH needs an `@odata.type`).
 
 ## Requirements
 
@@ -96,10 +113,19 @@ All endpoints use Microsoft Graph **beta**, which surfaces every derived templat
 
 ## Permissions
 
-- **Delegated Graph scope:** `DeviceManagementConfiguration.ReadWrite.All`
-  - The tool requests this scope at sign-in. The first time, an admin (or the user, if user consent is allowed) must consent.
-- **Directory role:** an account that can read and modify Intune device configuration — typically **Intune Administrator** (or a custom role with the equivalent read/update rights). Global Administrator works but is not required.
-- If your role can only see a subset of profile types, the others are skipped with a warning in the log rather than failing the whole pull.
+The tool requests these **delegated** Graph scopes at sign-in (covering all content types):
+
+| Scope | Used for |
+|---|---|
+| `DeviceManagementConfiguration.ReadWrite.All` | Config & compliance policies, admin templates, baselines, filters, update profiles |
+| `DeviceManagementScripts.ReadWrite.All` | PowerShell / remediation / macOS shell scripts *(required since 31 Jul 2025)* |
+| `DeviceManagementApps.ReadWrite.All` | App protection & app configuration policies |
+| `DeviceManagementServiceConfig.ReadWrite.All` | Autopilot profiles, enrollment configurations |
+| `Group.ReadWrite.All` | Entra ID groups *(only used if you opt that type in)* |
+
+- An admin must **consent** to these the first time (or pre-consent them in Entra ID).
+- **Directory role:** typically **Intune Administrator** (or a custom role with the equivalent read/update rights). Global Administrator works but isn't required. Renaming Entra groups additionally needs group-write rights.
+- **Partial consent is fine** — if a scope isn't granted, the content types that need it are simply skipped (logged as a warning) rather than failing the whole pull.
 
 ## Install
 
@@ -139,14 +165,15 @@ The script is a single self-contained `.ps1` file. It creates `Logs\` and `Backu
 ## Usage
 
 1. **Connect** — click **Connect to Intune** and sign in. The status bar shows the connected account and tenant.
-2. **Pull** — click **Pull** to load all configuration profiles into the grid.
-3. **Edit** — change values in the **New Name** / **New Description** columns. Changed cells are highlighted amber. You can:
+2. **(Optional) Content Types** — click **Content Types** and tick which types to pull (all on by default except Entra groups). Use *Select all* to toggle everything.
+3. **Pull** — click **Pull** to load the selected content types into the grid.
+4. **Edit** — change values in the **New Name** / **New Description** columns. Changed cells are highlighted amber. You can:
    - Edit directly in the grid, **or**
    - **Export** to CSV, edit in Excel, then **Import** the CSV back, **or**
    - Use **Find/Replace** for bulk changes (see below).
-4. **(Optional) Backup** — click **Backup** to save a JSON snapshot you can restore later.
-5. **(Optional) Dry run** — tick **Dry run** to preview what would change without writing anything.
-6. **Apply** — click **Apply**. You'll be asked to confirm. Only rows where the name or description differs from the current value are sent to Graph; each result is logged. (A safety backup is written automatically before any real apply.)
+5. **(Optional) Backup** — click **Backup** to save a JSON snapshot you can restore later.
+6. **(Optional) Dry run** — tick **Dry run** to preview what would change without writing anything.
+7. **Apply** — click **Apply**. You'll be asked to confirm. Only rows where the name or description differs from the current value are sent to Graph; each result is logged. (A safety backup is written automatically before any real apply.)
 
 > Toolbar buttons have tooltips describing each action.
 
@@ -200,9 +227,26 @@ Operates on the **New Name** / **New Description** columns in the grid (nothing 
 |---|---|
 | "This tool requires PowerShell 7" | You launched it in Windows PowerShell 5.1. Use `pwsh.exe`. |
 | "Microsoft Graph SDK not found" | Run `Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`. |
-| A profile type is missing after Pull | Your role may lack access to that type — check the log for a skipped/permission warning. |
-| `403 / Forbidden` on apply | Missing consent or insufficient role for `DeviceManagementConfiguration.ReadWrite.All`. |
-| `404 / NotFound` on apply | The profile was deleted since the last pull — Pull again. |
+| A content type is missing after Pull | It wasn't ticked in **Content Types**, or your role/consent lacks the scope for it — check the log for a skipped/permission warning. |
+| `403 / Forbidden` on apply | Missing consent or insufficient role for the relevant scope (see [Permissions](#permissions)). |
+| `404 / NotFound` on apply | The item was deleted since the last pull — Pull again. |
+| Entra groups won't rename | Synced (on-prem) groups are read-only in Entra, and renaming groups needs `Group.ReadWrite.All` consent. |
+
+## Changelog
+
+This project follows [Semantic Versioning](https://semver.org/). The version is set in the script's `PSScriptInfo` block and on the [PowerShell Gallery](https://www.powershellgallery.com/packages/Invoke-IntuneProfileManager).
+
+### 1.1.0
+
+- **Many more content types** — beyond configuration profiles, the tool now covers compliance policies, app protection (iOS/Android), app configuration (managed apps/devices), PowerShell/remediation/macOS shell scripts, assignment filters, Autopilot profiles, device categories, driver/feature/quality update profiles & policies, and (opt-in) Entra groups.
+- **Content Types picker** — a dropdown checklist (with *Select all*) to choose exactly which content types each Pull fetches.
+- **Expanded Graph scopes** to cover the new types, with graceful skip-on-missing-consent.
+- **Fix:** Content Types selection now persists correctly to the Pull action.
+
+### 1.0.0
+
+- Initial release. Bulk rename & re-describe Intune configuration profiles (Settings Catalog, Device Configuration templates, Administrative Templates, security baselines/intents).
+- Editable grid, CSV import/export, Find & Replace (literal/regex + strip-trailing-version preset), JSON backup & restore, dry-run mode, daily file logging, and a generated app icon.
 
 ## Disclaimer
 
@@ -212,4 +256,4 @@ This tool is provided **"as is", without warranty of any kind**, express or impl
 
 ---
 
-*Made by [modernworkspacehub.com](https://modernworkspacehub.com). Part of the same toolset as Win32Forge.*
+*Made by [modernworkspacehub.com](https://modernworkspacehub.com). Part of the same toolset as [Win32Forge](https://github.com/durrante/Win32Forge) — upload, automate & document Win32 apps in Intune.*

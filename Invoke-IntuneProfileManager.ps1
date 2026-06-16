@@ -2,7 +2,7 @@
 
 <#PSScriptInfo
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 041b1471-ad40-45b7-9fb0-81a12f91cd19
 
@@ -27,10 +27,12 @@
 .EXTERNALSCRIPTDEPENDENCIES
 
 .RELEASENOTES
-Initial release. Bulk rename and re-describe Intune configuration profiles (Settings Catalog,
-Device Configuration templates, Administrative Templates, and security baselines/intents) via
-Microsoft Graph. Includes an editable grid, CSV import/export, find & replace (literal/regex),
-JSON backup & restore, and a dry-run mode. Only display name and description are ever modified.
+1.1.0 - Expanded from configuration profiles to ~20 Intune content types (compliance policies,
+app protection & configuration, PowerShell/remediation/macOS scripts, assignment filters,
+Autopilot profiles, device categories, driver/feature/quality updates, and opt-in Entra groups).
+Added a Content Types picker to choose what each Pull fetches, expanded Graph scopes, and fixed
+content-type selection persistence. 1.0.0 - Initial release. Throughout, only display name and
+description are ever modified; nothing else about an item is changed.
 
 .PRIVATEDATA
 
@@ -41,31 +43,37 @@ JSON backup & restore, and a dry-run mode. Only display name and description are
     Intune Profile Manager — bulk rename & re-describe Intune configuration profiles.
 
 .DESCRIPTION
-    A self-contained Windows Forms (PowerShell 7+) desktop tool that connects to
-    Microsoft Graph and bulk-edits the display name and description of Intune
-    configuration profiles. All endpoints use Graph beta so every derived
-    template type is surfaced. Covers four profile families:
+    A self-contained Windows Forms (PowerShell 7+) desktop tool that connects to Microsoft
+    Graph and bulk-edits the display name and description of Intune objects. Only the name
+    and description are ever changed - nothing else about an item is touched.
 
-      • Settings Catalog        — deviceManagement/configurationPolicies    (name / description)
-      • Device Configuration    — deviceManagement/deviceConfigurations     (displayName / description)
-                                   includes every template: device restrictions, domain join, Wi-Fi,
-                                   VPN, SCEP / PKCS / trusted certificates, health monitoring, etc.
-      • Administrative Template — deviceManagement/groupPolicyConfigurations (displayName / description)
-      • Template / Baseline     — deviceManagement/intents                  (displayName / description)
-                                   endpoint security & security baselines
+    Covers ~20 content types (all via Graph beta, so every derived template is surfaced):
+      - Settings Catalog and Device Configuration (every template: device restrictions, domain
+        join, Wi-Fi, VPN, SCEP/PKCS/trusted certificates, health monitoring, kiosk, custom, ...)
+      - Administrative Templates and Templates / security baselines (intents)
+      - Compliance policies
+      - App protection (iOS/Android) and app configuration (managed apps/devices)
+      - PowerShell, remediation and macOS shell scripts
+      - Assignment filters, Autopilot profiles, device categories
+      - Driver / feature / quality update profiles and quality update policies
+      - Entra ID groups (opt-in)
 
     Workflow:
-      1. Connect to Microsoft Graph (DeviceManagementConfiguration.ReadWrite.All).
-      2. Pull all configuration profiles into an editable grid.
-      3. Edit NewName / NewDescription inline, OR Export to CSV, edit in Excel, Import back.
-      4. Apply — only profiles whose name or description changed are PATCHed.
-         Nothing else about the profile is touched.
-      5. Dry-run mode previews changes without calling Graph.
+      1. Connect to Microsoft Graph (delegated sign-in; consents the scopes for the above).
+      2. Pick which content types to pull, then Pull them into an editable grid.
+      3. Edit New Name / New Description inline, use Find & Replace, or Export to CSV,
+         edit in Excel, and Import back.
+      4. Apply - only items whose name or description changed are PATCHed.
+      5. Dry-run mode previews changes without calling Graph. JSON backup & restore included.
 
-    Visual design is derived from Win32Forge (modernworkspacehub.com) — same gradient
-    header, purple/blue palette, control styling, spacing and log conventions.
+    Project, documentation and issues:
+        https://github.com/durrante/Intune-Profile-Bulk-Renamer-Tool
 
-    Provided without warranty of any kind — use at your own risk.
+    A modernworkspacehub.com tool, part of the same toolset as Win32Forge
+    (https://github.com/durrante/Win32Forge).
+
+    Provided "as is", without warranty of any kind - use at your own risk. Not affiliated
+    with, endorsed by, or supported by Microsoft.
 
     Requires the Microsoft Graph PowerShell SDK authentication module:
         Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
@@ -139,24 +147,51 @@ $FontTitle   = New-Object System.Drawing.Font('Segoe UI Light', 18, [System.Draw
 $FontSub     = New-Object System.Drawing.Font('Segoe UI', 8.5)
 $FontMono    = New-Object System.Drawing.Font('Consolas', 9.5)
 
-# Graph endpoints — beta is used throughout because it surfaces every derived
-# configuration/template type (v1.0 omits many, e.g. SCEP / health monitoring).
+# Graph endpoints — beta is used throughout because it surfaces every derived type.
 $GraphBeta = 'https://graph.microsoft.com/beta'
-$RequiredScope = 'DeviceManagementConfiguration.ReadWrite.All'
+$GraphV1   = 'https://graph.microsoft.com/v1.0'
 
-# Profile type catalogue — each Intune profile family the tool understands.
-# Keyed by the friendly ProfileType shown in the grid / CSV.
-#   Base           : Graph endpoint root
-#   Collection     : resource collection path
-#   Select         : $select clause (keeps payloads small)
-#   NameProp       : property holding the display name when reading
-#   PatchNameProp  : property name to send the new display name as
-#   NeedsODataType : legacy deviceConfigurations require the derived @odata.type on PATCH
-$ProfileKinds = [ordered]@{
-    'Settings Catalog'        = @{ Base = $GraphBeta; Collection = 'deviceManagement/configurationPolicies';   Select = 'id,name,description';        NameProp = 'name';        PatchNameProp = 'name';        NeedsODataType = $false }
-    'Device Configuration'    = @{ Base = $GraphBeta; Collection = 'deviceManagement/deviceConfigurations';     Select = 'id,displayName,description'; NameProp = 'displayName'; PatchNameProp = 'displayName'; NeedsODataType = $true  }
-    'Administrative Template' = @{ Base = $GraphBeta; Collection = 'deviceManagement/groupPolicyConfigurations'; Select = 'id,displayName,description'; NameProp = 'displayName'; PatchNameProp = 'displayName'; NeedsODataType = $false }
-    'Template / Baseline'     = @{ Base = $GraphBeta; Collection = 'deviceManagement/intents';                   Select = 'id,displayName,description'; NameProp = 'displayName'; PatchNameProp = 'displayName'; NeedsODataType = $false }
+# Delegated scopes requested at sign-in. Together they cover every content type below.
+# If the signed-in admin hasn't consented to one, the affected types are simply skipped
+# on pull (logged as a warning) rather than failing the whole operation.
+$RequiredScopes = @(
+    'DeviceManagementConfiguration.ReadWrite.All'   # config, compliance, admin templates, baselines, filters, update profiles
+    'DeviceManagementScripts.ReadWrite.All'         # PowerShell / remediation / macOS shell scripts
+    'DeviceManagementApps.ReadWrite.All'            # app protection & app configuration policies
+    'DeviceManagementServiceConfig.ReadWrite.All'   # Autopilot profiles, enrollment configurations
+    'Group.ReadWrite.All'                           # Entra ID groups (opt-in content type)
+)
+
+# Content type catalogue — every Intune object family the tool can rename / re-describe.
+# Keyed by the friendly name shown in the grid, CSV and Content Types picker.
+#   Base/Collection : Graph endpoint
+#   Select          : $select clause (keeps payloads small)
+#   NameProp        : property holding the display name when reading
+#   PatchNameProp   : property name the new display name is sent as on PATCH
+#   NeedsODataType  : polymorphic collections need the derived @odata.type on PATCH
+#   Subtype         : show the specific template kind in brackets (Device Configuration only)
+#   Default         : pre-checked in the Content Types picker (Entra groups are opt-in)
+$ContentTypes = [ordered]@{
+    'Settings Catalog'            = @{ Base=$GraphBeta; Collection='deviceManagement/configurationPolicies';          Select='id,name,description';        NameProp='name';        PatchNameProp='name';        NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Device Configuration'        = @{ Base=$GraphBeta; Collection='deviceManagement/deviceConfigurations';           Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$true;  Subtype=$true;  Default=$true }
+    'Administrative Template'     = @{ Base=$GraphBeta; Collection='deviceManagement/groupPolicyConfigurations';      Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Template / Baseline'         = @{ Base=$GraphBeta; Collection='deviceManagement/intents';                        Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Compliance Policy'           = @{ Base=$GraphBeta; Collection='deviceManagement/deviceCompliancePolicies';       Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$true;  Subtype=$false; Default=$true }
+    'PowerShell Script'           = @{ Base=$GraphBeta; Collection='deviceManagement/deviceManagementScripts';        Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Remediation Script'          = @{ Base=$GraphBeta; Collection='deviceManagement/deviceHealthScripts';            Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'macOS Shell Script'          = @{ Base=$GraphBeta; Collection='deviceManagement/deviceShellScripts';             Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'App Protection (iOS)'        = @{ Base=$GraphBeta; Collection='deviceAppManagement/iosManagedAppProtections';     Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'App Protection (Android)'    = @{ Base=$GraphBeta; Collection='deviceAppManagement/androidManagedAppProtections'; Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'App Config (managed apps)'   = @{ Base=$GraphBeta; Collection='deviceAppManagement/targetedManagedAppConfigurations'; Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'App Config (managed devices)'= @{ Base=$GraphBeta; Collection='deviceAppManagement/mobileAppConfigurations';     Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$true;  Subtype=$false; Default=$true }
+    'Assignment Filter'           = @{ Base=$GraphBeta; Collection='deviceManagement/assignmentFilters';              Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Autopilot Profile'           = @{ Base=$GraphBeta; Collection='deviceManagement/windowsAutopilotDeploymentProfiles'; Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$true; Subtype=$false; Default=$true }
+    'Device Category'             = @{ Base=$GraphBeta; Collection='deviceManagement/deviceCategories';               Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Driver Update Profile'       = @{ Base=$GraphBeta; Collection='deviceManagement/windowsDriverUpdateProfiles';    Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Feature Update Profile'      = @{ Base=$GraphBeta; Collection='deviceManagement/windowsFeatureUpdateProfiles';   Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Quality Update Profile'      = @{ Base=$GraphBeta; Collection='deviceManagement/windowsQualityUpdateProfiles';   Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Quality Update Policy'       = @{ Base=$GraphBeta; Collection='deviceManagement/windowsQualityUpdatePolicies';   Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
+    'Entra Group'                 = @{ Base=$GraphV1;   Collection='groups';                                          Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$false }
 }
 
 # ── Paths (logs + backups live in the same repo as the script) ──────────────
@@ -171,7 +206,14 @@ $script:LogFile = Join-Path $script:LogDir "IntuneProfileManager_$(Get-Date -For
 # ── Shared state ────────────────────────────────────────────────────────────
 $script:Connected = $false
 $script:Loading   = $false          # suppresses highlight churn during bulk grid load
-$script:OdataMap  = @{}             # ProfileId -> @odata.type (legacy profiles only)
+$script:OdataMap  = @{}             # ProfileId -> @odata.type (polymorphic types only)
+
+# Which content types the next Pull will fetch (chosen in the Content Types picker).
+# Defaults to every type flagged Default=$true (i.e. everything except Entra groups).
+# NOTE: global scope — the picker saves from inside a closure, and a $script: write
+# inside a closure lands in the closure's own scope, not the real script scope.
+$global:IPMSelectedContentTypes = [System.Collections.Generic.List[string]]::new()
+foreach ($k in $ContentTypes.Keys) { if ($ContentTypes[$k].Default) { $global:IPMSelectedContentTypes.Add($k) } }
 
 #endregion
 
@@ -275,8 +317,8 @@ function New-AppIcon {
 # ─────────────────────────────────────────────────────────────────────────────
 $form = New-Object System.Windows.Forms.Form
 $form.Text          = 'Intune Profile Manager'
-$form.Size          = New-Object System.Drawing.Size(1120, 740)
-$form.MinimumSize   = New-Object System.Drawing.Size(940, 560)
+$form.Size          = New-Object System.Drawing.Size(1240, 760)
+$form.MinimumSize   = New-Object System.Drawing.Size(1080, 560)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor     = $Theme.White
 $form.Font          = $FontUI
@@ -380,6 +422,7 @@ $flow.Padding       = New-Object System.Windows.Forms.Padding(10, 0, 10, 0)
 $toolbar.Controls.Add($flow)
 
 $btnPull    = New-Object System.Windows.Forms.Button; $btnPull.Text    = 'Pull'
+$btnTypes   = New-Object System.Windows.Forms.Button; $btnTypes.Text   = 'Content Types  ▾'
 $btnExport  = New-Object System.Windows.Forms.Button; $btnExport.Text  = 'Export'
 $btnImport  = New-Object System.Windows.Forms.Button; $btnImport.Text  = 'Import'
 $btnFind    = New-Object System.Windows.Forms.Button; $btnFind.Text    = 'Find/Replace'
@@ -389,6 +432,7 @@ $btnApply   = New-Object System.Windows.Forms.Button; $btnApply.Text   = 'Apply'
 $btnClear   = New-Object System.Windows.Forms.Button; $btnClear.Text   = 'Clear'
 
 Set-PrimaryButton -Btn $btnPull  -Back $Theme.AccentBlue
+Set-ToolButton    -Btn $btnTypes
 Set-ToolButton    -Btn $btnExport
 Set-ToolButton    -Btn $btnImport
 Set-ToolButton    -Btn $btnFind
@@ -405,7 +449,8 @@ $chkDryRun.Margin   = New-Object System.Windows.Forms.Padding(6, 17, 10, 0)
 
 # Tooltips carry the detail the short labels drop
 $tip = New-Object System.Windows.Forms.ToolTip
-$tip.SetToolTip($btnPull,    'Pull all configuration profiles from Intune')
+$tip.SetToolTip($btnPull,    'Pull the selected content types from Intune')
+$tip.SetToolTip($btnTypes,   'Choose which Intune content types to pull')
 $tip.SetToolTip($btnExport,  'Export the grid to a CSV file')
 $tip.SetToolTip($btnImport,  'Import an edited CSV back into the grid')
 $tip.SetToolTip($btnFind,    'Find & replace across New Name / New Description')
@@ -422,8 +467,9 @@ $btnBackup.Enabled  = $false
 $btnApply.Enabled   = $false
 $btnRestore.Enabled = $false
 
-# Grouped: [Pull] | [Export / Import / Find] | [Backup / Restore] | [Apply / Dry run] | [Clear]
+# Grouped: [Pull · Content Types] | [Export / Import / Find] | [Backup / Restore] | [Apply / Dry run] | [Clear]
 $flow.Controls.Add($btnPull)
+$flow.Controls.Add($btnTypes)
 Add-FlowSeparator -Flow $flow | Out-Null
 $flow.Controls.Add($btnExport)
 $flow.Controls.Add($btnImport)
@@ -762,20 +808,21 @@ $btnConnect.Add_Click({
     }
 
     try {
-        Write-Log "Opening sign-in for scope: $RequiredScope" 'Info'
-        Connect-MgGraph -Scopes $RequiredScope -NoWelcome -ErrorAction Stop | Out-Null
+        Write-Log "Opening sign-in — requesting $($RequiredScopes.Count) delegated scopes..." 'Info'
+        Connect-MgGraph -Scopes $RequiredScopes -NoWelcome -ErrorAction Stop | Out-Null
         $ctx = Get-MgContext
         if (-not $ctx) { throw 'No Graph context returned after sign-in.' }
 
-        # Verify the consented scopes actually include what we need
-        if ($ctx.Scopes -notcontains $RequiredScope) {
-            Write-Log "Warning: '$RequiredScope' not present in granted scopes. Writes may fail." 'Warn'
+        # Note any requested scopes that weren't granted — those content types will be skipped on pull
+        $missing = @($RequiredScopes | Where-Object { $ctx.Scopes -notcontains $_ })
+        if ($missing.Count -gt 0) {
+            Write-Log "Not consented: $($missing -join ', '). Content types needing these will be skipped." 'Warn'
         }
 
         Set-ConnectedState -On $true -Account $ctx.Account -Tenant $ctx.TenantId
         Set-ActionButtonsEnabled
         Write-Log "Connected to tenant $($ctx.TenantId) as $($ctx.Account)." 'OK'
-        Set-Footer 'Connected. Click Pull Profiles to load configuration profiles.'
+        Set-Footer 'Connected. Choose Content Types if needed, then click Pull.'
     }
     catch {
         Set-ConnectedState -On $false
@@ -804,44 +851,54 @@ $btnPull.Add_Click({
         if ($ans -ne 'Yes') { return }
     }
 
+    # Only the content types ticked in the Content Types picker
+    $typesToPull = @($ContentTypes.Keys | Where-Object { $global:IPMSelectedContentTypes -contains $_ })
+    if ($typesToPull.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show('No content types selected. Click "Content Types" and tick at least one.', 'Nothing Selected', 'OK', 'Warning') | Out-Null
+        return
+    }
+
     $btnPull.Enabled = $false
-    Set-Footer 'Pulling configuration profiles...'
+    Set-Footer 'Pulling selected content types...'
     $script:Loading = $true
     $grid.Rows.Clear()
     $script:OdataMap.Clear()
     $total = 0; $anyFailed = $false
+    Write-Log "Pulling $($typesToPull.Count) content type$(if ($typesToPull.Count -ne 1){'s'}): $($typesToPull -join ', ')" 'Info'
 
-    foreach ($type in $ProfileKinds.Keys) {
-        $kind = $ProfileKinds[$type]
+    foreach ($type in $typesToPull) {
+        $kind = $ContentTypes[$type]
         $count = 0
         try {
-            Write-Log "Fetching $type profiles..." 'Info'
+            Write-Log "Fetching $type..." 'Info'
             $uri  = "$($kind.Base)/$($kind.Collection)?`$select=$($kind.Select)&`$top=100"
             $items = Get-GraphCollection -Uri $uri
             foreach ($p in $items) {
                 $nm = [string]$p.($kind.NameProp)
                 $ds = [string]$p.description
-                # Legacy device configs carry a derived @odata.type — use it for the PATCH and
-                # to show the specific template kind in brackets, e.g. "Device Configuration (VPN)".
                 $label = $type
+                # Polymorphic types carry a derived @odata.type — capture it for the PATCH, and
+                # (for Device Configuration) show the specific template kind, e.g. "(VPN)".
                 if ($kind.NeedsODataType -and $p.'@odata.type') {
                     $script:OdataMap[$p.id] = $p.'@odata.type'
-                    $sub = Get-TemplateSubtype $p.'@odata.type'
-                    if ($sub) { $label = "$type ($sub)" }
+                    if ($kind.Subtype) {
+                        $sub = Get-TemplateSubtype $p.'@odata.type'
+                        if ($sub) { $label = "$type ($sub)" }
+                    }
                 }
                 Add-ProfileRow -Id $p.id -Type $label -CurName $nm -CurDesc $ds -NewName $nm -NewDesc $ds
                 $count++
             }
-            Write-Log "Loaded $count $type profile$(if ($count -ne 1){'s'})." 'OK'
+            Write-Log "Loaded $count $type item$(if ($count -ne 1){'s'})." 'OK'
             $total += $count
         }
         catch {
             $anyFailed = $true
             $msg = $_.Exception.Message
             if ($msg -match '403|Forbidden') {
-                Write-Log "Skipped $type — access denied (your role may not include this profile type)." 'Warn'
+                Write-Log "Skipped $type — access denied (role/scope not consented for this type)." 'Warn'
             } else {
-                Write-Log "Failed to load $type profiles: $msg" 'Fail'
+                Write-Log "Failed to load $type`: $msg" 'Fail'
             }
         }
     }
@@ -851,8 +908,8 @@ $btnPull.Add_Click({
     Set-ActionButtonsEnabled
     $btnPull.Enabled = $true
 
-    Write-Log "Pull complete — $total profile$(if ($total -ne 1){'s'}) total across $($ProfileKinds.Count) profile types." $(if ($anyFailed) { 'Warn' } else { 'OK' })
-    Set-Footer "$total profiles loaded. Edit New Name / New Description, or Export to CSV."
+    Write-Log "Pull complete — $total item$(if ($total -ne 1){'s'}) total across $($typesToPull.Count) content type$(if ($typesToPull.Count -ne 1){'s'})." $(if ($anyFailed) { 'Warn' } else { 'OK' })
+    Set-Footer "$total items loaded. Edit New Name / New Description, or Export to CSV."
 })
 #endregion
 
@@ -944,7 +1001,7 @@ $btnImport.Add_Click({
             Write-Log "Skipped CSV line $lineNo — blank ProfileId or ProfileType." 'Warn'
             $skipped++; continue
         }
-        if (-not $ProfileKinds.Contains((Get-BaseProfileType $type))) {
+        if (-not $ContentTypes.Contains((Get-BaseProfileType $type))) {
             Write-Log "Skipped CSV line $lineNo — unknown ProfileType '$type'." 'Warn'
             $skipped++; continue
         }
@@ -971,28 +1028,28 @@ $btnImport.Add_Click({
 # ─────────────────────────────────────────────────────────────────────────────
 #region Apply changes
 # ─────────────────────────────────────────────────────────────────────────────
-function Get-LegacyODataType {
-    param([string]$Id)
+# Resolve a polymorphic item's derived @odata.type (required on PATCH for some types).
+# Prefers the value captured during pull; otherwise GETs the single item from its endpoint.
+function Get-ContentODataType {
+    param([string]$Base, [string]$Collection, [string]$Id)
     if ($script:OdataMap.ContainsKey($Id) -and $script:OdataMap[$Id]) { return $script:OdataMap[$Id] }
-    # Fetch the single profile to discover its derived @odata.type (needed for PATCH).
-    # Uses beta so every derived template type (SCEP/health monitoring/etc.) resolves.
-    $item = Invoke-MgGraphRequest -Method GET -Uri "$GraphBeta/deviceManagement/deviceConfigurations/$Id" -OutputType PSObject
+    $item = Invoke-MgGraphRequest -Method GET -Uri "$Base/$Collection/$Id" -OutputType PSObject
     $odt  = $item.'@odata.type'
     if ($odt) { $script:OdataMap[$Id] = $odt }
     return $odt
 }
 
-# Single PATCH path used by both Apply and Restore — routes by profile type via $ProfileKinds.
-# Only ever touches the display name and description; nothing else about the profile is sent.
+# Single PATCH path used by both Apply and Restore — routes by content type via $ContentTypes.
+# Only ever touches the display name and description; nothing else about the item is sent.
 function Invoke-ProfilePatch {
     param([string]$Type, [string]$Id, [string]$Name, [string]$Desc)
-    $kind = $ProfileKinds[(Get-BaseProfileType $Type)]
-    if (-not $kind) { throw "Unknown profile type '$Type'." }
+    $kind = $ContentTypes[(Get-BaseProfileType $Type)]
+    if (-not $kind) { throw "Unknown content type '$Type'." }
     $body = @{ description = $Desc }
     $body[$kind.PatchNameProp] = $Name
     if ($kind.NeedsODataType) {
-        $odt = Get-LegacyODataType -Id $Id
-        if (-not $odt) { throw 'Could not determine @odata.type for this legacy profile.' }
+        $odt = Get-ContentODataType -Base $kind.Base -Collection $kind.Collection -Id $Id
+        if (-not $odt) { throw 'Could not determine @odata.type for this item.' }
         $body['@odata.type'] = $odt
     }
     Invoke-MgGraphRequest -Method PATCH -Uri "$($kind.Base)/$($kind.Collection)/$Id" -Body $body | Out-Null
@@ -1249,6 +1306,7 @@ $btnClear.Add_Click({
 
 $btnClearLog.Add_Click({ $logBox.Clear() })
 $btnFind.Add_Click({ Show-FindReplace })
+$btnTypes.Add_Click({ Show-ContentTypePicker $btnTypes })
 
 $form.Add_FormClosing({
     if ($script:Connected) { try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {} }
@@ -1479,9 +1537,83 @@ function Show-FindReplace {
 #endregion
 
 # ─────────────────────────────────────────────────────────────────────────────
+#region Content Types picker
+# ─────────────────────────────────────────────────────────────────────────────
+# A dropdown-style popup (checklist + Select all) under the Content Types button.
+# The ticked set drives what the next Pull fetches. Closes when it loses focus.
+function Show-ContentTypePicker {
+    param($AnchorButton)
+
+    $pop = New-Object System.Windows.Forms.Form
+    $pop.FormBorderStyle = 'None'
+    $pop.StartPosition   = 'Manual'
+    $pop.ShowInTaskbar   = $false
+    $pop.KeyPreview      = $true
+    $pop.BackColor       = C '#B9B9B9'                              # shows as a 1px border
+    $pop.Padding         = New-Object System.Windows.Forms.Padding(1)
+    $pop.Size            = New-Object System.Drawing.Size(268, 474)
+
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'; $inner.BackColor = $Theme.White
+    $inner.Padding = New-Object System.Windows.Forms.Padding(12, 10, 12, 10)
+    $pop.Controls.Add($inner)
+
+    $clb = New-Object System.Windows.Forms.CheckedListBox
+    $clb.Dock = 'Fill'; $clb.Font = $FontUI; $clb.CheckOnClick = $true
+    $clb.BorderStyle = 'None'; $clb.IntegralHeight = $false
+    foreach ($k in $ContentTypes.Keys) { [void]$clb.Items.Add($k) }
+
+    $sep = New-Object System.Windows.Forms.Panel
+    $sep.Dock = 'Top'; $sep.Height = 8; $sep.BackColor = $Theme.White
+
+    $chkAll = New-Object System.Windows.Forms.CheckBox
+    $chkAll.Text = 'Select all'; $chkAll.Dock = 'Top'; $chkAll.Height = 26; $chkAll.Font = $FontUI
+
+    $hdr = New-Object System.Windows.Forms.Label
+    $hdr.Text = 'Content Types'; $hdr.Dock = 'Top'; $hdr.Height = 24; $hdr.Font = $FontUIBold
+
+    # Fill added first (sits behind), then Top items in bottom-to-top add order
+    $inner.Controls.Add($clb)
+    $inner.Controls.Add($sep)
+    $inner.Controls.Add($chkAll)
+    $inner.Controls.Add($hdr)
+
+    for ($i = 0; $i -lt $clb.Items.Count; $i++) {
+        $clb.SetItemChecked($i, ($global:IPMSelectedContentTypes -contains ([string]$clb.Items[$i])))
+    }
+    $chkAll.Checked = ($clb.CheckedItems.Count -eq $clb.Items.Count)
+
+    $chkAll.Add_Click({
+        $state = $chkAll.Checked
+        for ($i = 0; $i -lt $clb.Items.Count; $i++) { $clb.SetItemChecked($i, $state) }
+    }.GetNewClosure())
+
+    $pop.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq 'Escape') { $pop.Close() } }.GetNewClosure())
+    $pop.Add_Deactivate({ $pop.Close() }.GetNewClosure())
+    $pop.Add_FormClosed({
+        $sel = [System.Collections.Generic.List[string]]::new()
+        foreach ($it in $clb.CheckedItems) { $sel.Add([string]$it) }
+        $global:IPMSelectedContentTypes = $sel
+        Set-Footer "$($sel.Count) of $($ContentTypes.Count) content types selected for the next Pull."
+    }.GetNewClosure())
+
+    # Position under the button, clamped to the screen working area
+    $pt = $AnchorButton.PointToScreen([System.Drawing.Point]::new(0, $AnchorButton.Height + 2))
+    $wa = [System.Windows.Forms.Screen]::FromControl($AnchorButton).WorkingArea
+    $x  = [Math]::Min([int]$pt.X, $wa.Right - $pop.Width - 4)
+    $y  = [int]$pt.Y
+    if ($y + $pop.Height -gt $wa.Bottom) { $y = $wa.Bottom - $pop.Height - 4 }
+    $pop.Location = New-Object System.Drawing.Point($x, $y)
+
+    $pop.Show($form)
+    $pop.Activate()
+}
+#endregion
+
+# ─────────────────────────────────────────────────────────────────────────────
 #region Launch
 # ─────────────────────────────────────────────────────────────────────────────
 Write-Log 'Intune Profile Manager started.' 'Info'
-Write-Log 'Click "Connect to Intune" to sign in, then "Pull Profiles".' 'Info'
+Write-Log 'Connect, choose Content Types if needed, then Pull.' 'Info'
 [void]$form.ShowDialog()
 #endregion
