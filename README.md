@@ -85,7 +85,8 @@ All endpoints use Microsoft Graph **beta** (except Entra groups, which use `v1.0
 | **Device Configuration** *(all templates — device restrictions, domain join, Wi-Fi, VPN, SCEP/PKCS/trusted certs, health monitoring, kiosk, email, custom OMA-URI, …)* | `deviceManagement/deviceConfigurations` |
 | **Administrative Template** | `deviceManagement/groupPolicyConfigurations` |
 | **Template / Baseline** *(endpoint security & security baselines)* | `deviceManagement/intents` |
-| **Compliance Policy** | `deviceManagement/deviceCompliancePolicies` |
+| **Compliance Policy** (legacy per-platform) | `deviceManagement/deviceCompliancePolicies` |
+| **Compliance Policy (Settings)** (settings-based, incl. Linux) | `deviceManagement/compliancePolicies` |
 | **PowerShell Script** | `deviceManagement/deviceManagementScripts` |
 | **Remediation Script** | `deviceManagement/deviceHealthScripts` |
 | **macOS Shell Script** | `deviceManagement/deviceShellScripts` |
@@ -235,6 +236,11 @@ Operates on the **New Name** / **New Description** columns in the grid (nothing 
 ## Changelog
 
 This project follows [Semantic Versioning](https://semver.org/). The version is set in the script's `PSScriptInfo` block and on the [PowerShell Gallery](https://www.powershellgallery.com/packages/Invoke-IntuneProfileManager).
+
+### 1.2.0
+
+- **Settings-based compliance policies** — added the newer `deviceManagement/compliancePolicies` engine (used for Linux and the newer settings-based compliance experience) alongside the existing legacy per-platform compliance policies.
+- **Fix:** Apply/Import now works for content types whose name contains parentheses (e.g. *App Protection (iOS)*, *App Config (managed apps)*), which previously failed to route to the correct endpoint.
 
 ### 1.1.0
 

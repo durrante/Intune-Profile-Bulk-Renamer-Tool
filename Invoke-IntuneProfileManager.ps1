@@ -2,7 +2,7 @@
 
 <#PSScriptInfo
 
-.VERSION 1.1.0
+.VERSION 1.2.0
 
 .GUID 041b1471-ad40-45b7-9fb0-81a12f91cd19
 
@@ -27,6 +27,9 @@
 .EXTERNALSCRIPTDEPENDENCIES
 
 .RELEASENOTES
+1.2.0 - Added the settings-based compliance policy engine (deviceManagement/compliancePolicies,
+used for Linux and newer compliance policies) alongside the existing legacy compliance policies.
+Fixed Apply/Import for content types whose name contains parentheses (e.g. App Protection (iOS)).
 1.1.0 - Expanded from configuration profiles to ~20 Intune content types (compliance policies,
 app protection & configuration, PowerShell/remediation/macOS scripts, assignment filters,
 Autopilot profiles, device categories, driver/feature/quality updates, and opt-in Entra groups).
@@ -177,6 +180,7 @@ $ContentTypes = [ordered]@{
     'Administrative Template'     = @{ Base=$GraphBeta; Collection='deviceManagement/groupPolicyConfigurations';      Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
     'Template / Baseline'         = @{ Base=$GraphBeta; Collection='deviceManagement/intents';                        Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
     'Compliance Policy'           = @{ Base=$GraphBeta; Collection='deviceManagement/deviceCompliancePolicies';       Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$true;  Subtype=$false; Default=$true }
+    'Compliance Policy (Settings)'= @{ Base=$GraphBeta; Collection='deviceManagement/compliancePolicies';             Select='id,name,description';        NameProp='name';        PatchNameProp='name';        NeedsODataType=$false; Subtype=$false; Default=$true }
     'PowerShell Script'           = @{ Base=$GraphBeta; Collection='deviceManagement/deviceManagementScripts';        Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
     'Remediation Script'          = @{ Base=$GraphBeta; Collection='deviceManagement/deviceHealthScripts';            Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
     'macOS Shell Script'          = @{ Base=$GraphBeta; Collection='deviceManagement/deviceShellScripts';             Select='id,displayName,description'; NameProp='displayName'; PatchNameProp='displayName'; NeedsODataType=$false; Subtype=$false; Default=$true }
@@ -757,10 +761,14 @@ function Get-TemplateSubtype {
     }
 }
 
-# The grid/CSV ProfileType may carry a subtype suffix "Base (Subtype)"; routing needs the base.
+# The grid/CSV ProfileType may carry a subtype suffix "Base (Subtype)" (e.g. Device
+# Configuration (VPN)); routing needs the base key. Some content-type keys legitimately
+# contain parentheses (e.g. "App Protection (iOS)"), so match an exact key first and only
+# strip a trailing " (...)" when the full value isn't itself a known content type.
 function Get-BaseProfileType {
     param([string]$Value)
     if (-not $Value) { return $Value }
+    if ($ContentTypes.Contains($Value)) { return $Value }
     $i = $Value.IndexOf(' (')
     if ($i -ge 0) { return $Value.Substring(0, $i) }
     return $Value
