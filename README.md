@@ -8,6 +8,8 @@ A self-contained **PowerShell 7 + Windows Forms** desktop tool for **bulk renami
 
 Pull every configuration profile from your tenant into an editable grid, change the **display name** and/or **description** — inline, in Excel, or with built-in find & replace — and write the changes back. Only the name and description are ever modified; nothing else about a profile is touched.
 
+📖 **Full write-up and walkthrough:** [Intune: Bulk Rename and Re-describe Every Policy in Minutes](https://modernworkspacehub.com/intune-bulk-rename-policies-tool/) on modernworkspacehub.com.
+
 > ⚠️ A free tool by **[modernworkspacehub.com](https://modernworkspacehub.com)**. Provided **"as is", without warranty of any kind** — it modifies live data in your Intune tenant, so use at your own risk. See [Disclaimer](#disclaimer).
 
 ---
@@ -262,4 +264,4 @@ This tool is provided **"as is", without warranty of any kind**, express or impl
 
 ---
 
-*Made by [modernworkspacehub.com](https://modernworkspacehub.com). Part of the same toolset as [Win32Forge](https://github.com/durrante/Win32Forge) — upload, automate & document Win32 apps in Intune.*
+*Made by [modernworkspacehub.com](https://modernworkspacehub.com). Read the [full write-up](https://modernworkspacehub.com/intune-bulk-rename-policies-tool/). Part of the same toolset as [Win32Forge](https://github.com/durrante/Win32Forge) — upload, automate & document Win32 apps in Intune.*
